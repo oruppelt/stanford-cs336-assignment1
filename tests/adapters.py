@@ -73,7 +73,6 @@ def run_embedding(
     embeddings.embedding_tensor.data = weights
     return embeddings.forward(token_ids)
 
-
 def run_swiglu(
     d_model: int,
     d_ff: int,
