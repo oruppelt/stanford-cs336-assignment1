@@ -9,6 +9,24 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
+import regex as re
+from collections import Counter
+
+from concurrent.futures import ProcessPoolExecutor
+# from cs336_basics.bpe_trainer import BPETrainer
+from cs336_basics.bpe_trainer_improv import BPETrainer, train_bpe_tokenizer
+
+from cs336_basics.bpe_optimized import OptimizedBPETrainer, train_bpe_tokenizer_optimized
+from cs336_basics.parallel_optim import parallel_counts_by_segments
+from cs336_basics.bpe_main import BPETokenizer
+
+from cs336_basics.transformer_blocks import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadSelfAttention
+from cs336_basics.transformer_blocks import softmax, scaled_dot_product_attention, TransformerBlock, TransformerLM
+# from cs336_basics.debug_mhsa import MultiHeadSelfAttention
+
+from cs336_basics.transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
+
+from cs336_basics.transformers_train import load_batch, save_checkpoint, load_checkpoint
 
 def run_linear(
     d_in: int,
@@ -28,8 +46,9 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    linear = Linear(d_in, d_out)
+    linear.weight.data = weights
+    return linear.forward(in_features)
 
 
 def run_embedding(
@@ -50,8 +69,9 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    embeddings = Embedding(vocab_size, d_model)
+    embeddings.embedding_tensor.data = weights
+    return embeddings.forward(token_ids)
 
 
 def run_swiglu(
@@ -83,8 +103,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.W1.weight.data = w1_weight
+    swiglu.W2.weight.data = w2_weight
+    swiglu.W3.weight.data = w3_weight
 
+    return swiglu.forward(x=in_features)
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -104,7 +128,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -138,7 +162,16 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mhsa = MultiHeadSelfAttention(d_model=d_model, num_heads=num_heads)
+
+    mhsa.W_q.weight.data = q_proj_weight
+    mhsa.W_k.weight.data = k_proj_weight
+    mhsa.W_v.weight.data = v_proj_weight
+    mhsa.W_o.weight.data = o_proj_weight
+
+    output = mhsa.forward(in_features, False)
+
+    return output
 
 
 def run_multihead_self_attention_with_rope(
@@ -178,7 +211,16 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mhsa = MultiHeadSelfAttention(d_model=d_model, num_heads=num_heads, rope_theta=theta, max_seq_len=max_seq_len)
+
+    mhsa.W_q.weight.data = q_proj_weight
+    mhsa.W_k.weight.data = k_proj_weight
+    mhsa.W_v.weight.data = v_proj_weight
+    mhsa.W_o.weight.data = o_proj_weight
+
+    output = mhsa.forward(in_features, True, token_positions)
+
+    return output
 
 
 def run_rope(
@@ -200,7 +242,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    rope = RotaryPositionalEmbedding(theta, d_k, max_seq_len)
+
+    return rope.forward(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -273,7 +317,23 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    transformer_block = TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, rope_theta=theta, max_seq_len=max_seq_len)
+
+    transformer_block.attention.W_q.weight.data = weights["attn.q_proj.weight"]
+    transformer_block.attention.W_k.weight.data = weights["attn.k_proj.weight"] 
+    transformer_block.attention.W_v.weight.data = weights["attn.v_proj.weight"]
+    transformer_block.attention.W_o.weight.data = weights["attn.output_proj.weight"]
+
+    transformer_block.norm1.gain.data = weights["ln1.weight"]
+    transformer_block.norm2.gain.data = weights["ln2.weight"]
+
+    transformer_block.feed_forward.W1.weight.data = weights["ffn.w1.weight"]
+    transformer_block.feed_forward.W2.weight.data = weights["ffn.w2.weight"] 
+    transformer_block.feed_forward.W3.weight.data = weights["ffn.w3.weight"]
+
+    output = transformer_block.forward(x=in_features, apply_rope=True, token_positions=None)
+
+    return output
 
 
 def run_transformer_lm(
@@ -300,7 +360,7 @@ def run_transformer_lm(
         num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
-        rope_theta (float): The RoPE $\Theta$ parameter.
+        rope_theta (float): The RoPE Theta parameter.
         weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
@@ -355,7 +415,48 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer = TransformerLM(vocab_size=vocab_size,
+                                context_length=context_length,
+                                d_model=d_model,
+                                num_layers=num_layers,
+                                num_heads=num_heads,
+                                d_ff=d_ff,
+                                rope_theta=rope_theta
+                                )
+    transformer.token_embedding.embedding_tensor.data = weights["token_embeddings.weight"]
+    transformer.lm_head.weight.data = weights["lm_head.weight"]
+
+    for layer_idx in range(num_layers):
+        # FIXED: Correct key extraction for each layer
+        layer_prefix = f"layers.{layer_idx}."
+
+        q_key = f"{layer_prefix}attn.q_proj.weight"
+        k_key = f"{layer_prefix}attn.k_proj.weight"
+        v_key = f"{layer_prefix}attn.v_proj.weight"
+        o_key = f"{layer_prefix}attn.output_proj.weight"
+
+        transformer.transformer_blocks[layer_idx].attention.W_q.weight.data = weights[q_key]
+        transformer.transformer_blocks[layer_idx].attention.W_k.weight.data = weights[k_key]
+        transformer.transformer_blocks[layer_idx].attention.W_v.weight.data = weights[v_key]
+        transformer.transformer_blocks[layer_idx].attention.W_o.weight.data = weights[o_key]
+
+        ln1_key = f"{layer_prefix}ln1.weight"
+        ln2_key = f"{layer_prefix}ln2.weight"
+
+        transformer.transformer_blocks[layer_idx].norm1.gain.data = weights[ln1_key]
+        transformer.transformer_blocks[layer_idx].norm2.gain.data = weights[ln2_key]
+
+        w1_key = f"{layer_prefix}ffn.w1.weight"
+        w2_key = f"{layer_prefix}ffn.w2.weight"
+        w3_key = f"{layer_prefix}ffn.w3.weight"
+
+        transformer.transformer_blocks[layer_idx].feed_forward.W1.weight.data = weights[w1_key]
+        transformer.transformer_blocks[layer_idx].feed_forward.W2.weight.data = weights[w2_key]
+        transformer.transformer_blocks[layer_idx].feed_forward.W3.weight.data = weights[w3_key]
+
+    transformer.final_norm.gain.data = weights["ln_final.weight"]
+
+    return transformer.forward(input_ids=in_indices, apply_rope=True, return_logits=True)
 
 
 def run_rmsnorm(
@@ -378,7 +479,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rmsnorm = RMSNorm(d_model, eps)
+    rmsnorm.gain.data = weights
+    return rmsnorm.forward(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -415,7 +518,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return load_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -431,7 +534,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(
@@ -449,7 +552,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
@@ -461,14 +564,14 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    return gradient_clipping(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
@@ -496,7 +599,7 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    return cos_annealing(it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters)
 
 
 def run_save_checkpoint(
@@ -515,7 +618,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    save_checkpoint(model=model, optimizer=optimizer, iteration=iteration, out=out)
 
 
 def run_load_checkpoint(
@@ -536,7 +639,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(src=src, model=model, optimizer=optimizer)
 
 
 def get_tokenizer(
@@ -559,7 +662,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    return BPETokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
@@ -589,4 +692,72 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    path_str = os.fspath(input_path)
+    use_parallel = kwargs.get("parallel", False)  # default to optimized single-threaded
+    use_optimized = kwargs.get("optimized", True)  # default to optimized implementation
+    num_processes = kwargs.get("num_processes", os.cpu_count() or 4)
+
+    if use_parallel:
+        # Use parallel pretokenization with optimized trainer
+        totals: Counter[bytes] = parallel_counts_by_segments(
+            input_path=path_str,
+            special_tokens=list(special_tokens),
+            max_workers=num_processes,
+        )
+
+        # Initialize optimized trainer from counts
+        trainer = OptimizedBPETrainer(special_tokens=list(special_tokens))
+        trainer.word_counts = totals
+        trainer.segmented_words = {w: [bytes([b]) for b in w] for w in totals}
+        trainer.vocab_index = {bytes([b]): b for b in range(256)}
+
+        trainer.fit_to_vocab_size(vocab_size)
+        vocab, merges = trainer.export_vocab_and_merges(vocab_size)
+        return vocab, merges
+
+    elif use_optimized:
+        # Use optimized single-threaded implementation
+        return train_bpe_tokenizer_optimized(
+            input_path=path_str,
+            vocab_size=vocab_size,
+            special_tokens=list(special_tokens),
+        )
+
+    else:
+        # Fall back to original implementation (for testing/comparison)
+        from cs336_basics.bpe_trainer_improv import train_bpe_tokenizer
+        return train_bpe_tokenizer(
+            input_path=path_str,
+            vocab_size=vocab_size,
+            special_tokens=list(special_tokens),
+        )
+
+    # path_str = os.fspath(input_path)
+    # # allow override parallel=False for debugging if needed
+    # parallel = kwargs.get("parallel", True)
+    # num_processes = kwargs.get("num_processes", os.cpu_count() or 4)
+
+    # if not parallel:
+    #     # serial (uses the same semantics) — handy for quick diff checks
+    #     return train_bpe_tokenizer(
+    #         input_path=path_str,
+    #         vocab_size=vocab_size,
+    #         special_tokens=list(special_tokens),
+    #     )
+
+    # # --- Parallel pretokenization with serial semantics ---
+    # totals: Counter[bytes] = parallel_counts_by_segments(
+    #     input_path=path_str,
+    #     special_tokens=list(special_tokens),
+    #     max_workers=num_processes,
+    # )
+
+    # # Initialize trainer from counts; keep reference merge loop (full recount + lex-greater tie-break)
+    # trainer = BPETrainer(special_tokens=list(special_tokens))
+    # trainer.word_counts = totals
+    # trainer.segmented_words = {w: [bytes([b]) for b in w] for w in totals}
+    # trainer.vocab_index = {bytes([b]): b for b in range(256)}
+
+    # trainer.fit_to_vocab_size(vocab_size)
+    # vocab, merges = trainer.export_vocab_and_merges(vocab_size)
+    # return vocab, merges

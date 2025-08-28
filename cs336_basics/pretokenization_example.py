@@ -1,6 +1,36 @@
 import os
 from typing import BinaryIO
 
+import regex as re
+from collections import Counter
+
+from concurrent.futures import ProcessPoolExecutor
+from cs336_basics.bpe_trainer import BPETrainer, build_token_pattern
+
+input_path = "../data/TinyStoriesV2-GPT4-train.txt"
+vocab_size = 1_000
+special_tokens = ["<|endoftext|>"]
+num_processes = 4
+_DELIM_B = b"<|endoftext|>"
+
+PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
+
+def read_slice(path, start, end):
+    with open(path, "rb") as f:
+        f.seek(start)
+        return f.read(end - start)
+
+def parallel_counts(input_path, boundaries, specials_b: set[bytes]) -> Counter[bytes]:
+    totals = Counter()
+    with ProcessPoolExecutor() as ex:
+        futs = [
+            ex.submit(count_chunk, read_slice(input_path, s, e), specials_b)
+            for s, e in zip(boundaries[:-1], boundaries[1:])
+        ]
+        for fu in futs:
+            totals += fu.result()
+    return totals
+
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -48,15 +78,60 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+def init_from_counts(trainer, word_counts: Counter[bytes]):
+    trainer.word_counts = word_counts
+    trainer.segmented_words = {w: [bytes([b]) for b in w] for w in word_counts}
+    # Initialize full 256-byte base
+    base_symbols = [bytes([b]) for b in range(256)]
+    trainer.vocab_index = {sym: i for i, sym in enumerate(base_symbols)}
+    trainer._pairs_dirty = True
 
-## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
+def count_chunk_from_file(path: str, start: int, end: int, special_tokens: list[str]) -> Counter[bytes]:
+    with open(path, "rb") as f:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+
+    pat = build_token_pattern(special_tokens)
+    c = Counter()
+    for m in pat.finditer(chunk):
+        tok = m.group(0)
+        if tok:
+            c[tok.encode("utf-8")] += 1
+    return c
+
+if __name__ == "__main__":
+    num_processes = 4
+    with open(input_path, "rb") as f:
+
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+
+    specials_b = {s.encode("utf-8") for s in special_tokens}
+
+    totals = Counter()
+    with ProcessPoolExecutor(max_workers=num_processes) as ex:
+        futures = [
+            ex.submit(count_chunk_from_file, input_path, start, end, special_tokens)
+            for start, end in zip(boundaries[:-1], boundaries[1:])
+        ]
+
+        for fut in futures:
+            totals += fut.result()
+
+    # totals: Counter[bytes] from parallel pretokenization
+    trainer = BPETrainer(byte_level=True)
+    trainer.special_tokens = special_tokens
+
+    # Inject parallel counts
+    trainer.word_counts = totals
+    trainer.segmented_words = {
+        w: ([w] if w.decode("utf-8", errors="ignore") in set(special_tokens)
+            else [bytes([b]) for b in w])
+        for w in trainer.word_counts
+    }
+    # Initialize base 256-byte vocab
+    trainer.vocab_index = {bytes([b]): b for b in range(256)}
+    trainer._pairs_dirty = True
+
+    # Continue training as normal
+    trainer.compute_pair_stats().fit_to_vocab_size(vocab_size, special_tokens)
+    vocab, merges = trainer.export_vocab_and_merges(special_tokens, vocab_size)

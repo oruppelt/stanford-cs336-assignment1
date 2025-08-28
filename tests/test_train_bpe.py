@@ -73,10 +73,15 @@ def test_train_bpe_special_tokens(snapshot):
         vocab_size=1000,
         special_tokens=["<|endoftext|>"],
     )
-
+    # save vocab to disk for debugging
+    # with open(FIXTURES_PATH / "train-bpe-special-tokens-vocab.json", "w", encoding="utf-8") as f:
+    #     json.dump(vocab, f, ensure_ascii=False, indent=2)
     # Check that the special token is not in the vocab
     vocabs_without_specials = [word for word in vocab.values() if word != b"<|endoftext|>"]
     for word_bytes in vocabs_without_specials:
+        # print(f"Checking word: {word_bytes}")
+        # if b"<|" in word_bytes:
+        #     print(f"Warning: Found special token in word: {word_bytes}")
         assert b"<|" not in word_bytes
 
     snapshot.assert_match(
