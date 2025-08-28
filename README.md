@@ -6,6 +6,38 @@ For a full description of the assignment, see the assignment handout at
 If you see any issues with the assignment handout or code, please feel free to
 raise a GitHub issue or open a pull request with a fix.
 
+
+## What is inside
+
+My implementation of the transformer model, including the encoder and decoder components, as well as the attention mechanism.
+
+cs336_basics folder contains a lot of code, including the implementation of the transformer model and its components.
+
+In order to run the code, you will need to set up your environment and install the necessary dependencies.
+
+### Usage examples
+
+```sh
+python cs336_basics/transformers_train.py \
+  --train_data ./data/train_tokens.npy \
+  --val_data ./data/val_tokens.npy \
+  --vocab_size 50257 \
+  --batch_size 32 \
+  --context_length 1024 \
+  --max_steps 100000
+```
+
+resume training
+
+```sh
+python cs336_basics/transformers_train.py \
+  --train_data ./data/train_tokens.npy \
+  --val_data ./data/val_tokens.npy \
+  --vocab_size 50257 \
+  --resume_from ./checkpoints/checkpoint_050000.pt \
+  --checkpoint_dir ./checkpoints
+```
+
 ## Setup
 
 ### Environment
@@ -25,6 +57,12 @@ and the environment will be automatically solved and activated when necessary.
 ```sh
 uv run pytest
 ```
+
+```sh
+uv run pytest
+```
+
+
 
 Initially, all tests should fail with `NotImplementedError`s.
 To connect your implementation to the tests, complete the
