@@ -11,11 +11,34 @@ raise a GitHub issue or open a pull request with a fix.
 
 My implementation of the transformer model, including the encoder and decoder components, as well as the attention mechanism.
 
+Also BPE trainer and tokenizer.
+
 cs336_basics folder contains a lot of code, including the implementation of the transformer model and its components.
 
 In order to run the code, you will need to set up your environment and install the necessary dependencies.
 
 ### Usage examples
+
+Train BPE Tokenizer
+```sh
+python parallel_optim.py
+```
+Outputs:
+
+../artifacts/.../vocab.json
+../artifacts/.../merges.json
+
+Encode Datasets to .npy Files
+```sh
+python bpe_main.py
+```
+
+Outputs:
+
+../artifacts/.../train_tokens.npy
+../artifacts/.../val_tokens.npy
+
+Train
 
 ```sh
 python cs336_basics/transformers_train.py \

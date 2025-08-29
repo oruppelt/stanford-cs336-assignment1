@@ -4,6 +4,7 @@ from typing import Dict, Iterable, List, Tuple, Set, Iterator
 
 import regex as re
 import numpy as np
+import time
 
 PAT = re.compile(
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -223,54 +224,57 @@ class BPETokenizer:
 
 # Usage example and testing
 if __name__ == "__main__":
+
+    start_total = time.time()
+    print("1. Starting tokenizer loading...")
+
     tokenizer = BPETokenizer.from_files(
         vocab_path="../artifacts/ts_train/vocab.json",
         merges_path="../artifacts/ts_train/merges.json",
         special_tokens=["<|endoftext|>"]
     )
 
-    output_path = "../artifacts/ts_train/val_tokens.npy"
+    output_path = "../artifacts/ts_train/train_tokens.npy"
 
-    # Test with small text
+    print(f"2. Tokenizer loaded in {time.time() - start_total:.2f}s")
+
+    # Test encoding
+    test_start = time.time()
     test_text = "Hello world!<|endoftext|>"
     token_ids = tokenizer.encode(test_text)
     decoded = tokenizer.decode(token_ids)
-
-    print(f"Original: {test_text}")
-    print(f"Token IDs: {token_ids}")
-    print(f"Decoded: {decoded}")
+    print(f"3. Test encoding/decoding took {time.time() - test_start:.2f}s")
 
     try:
-        with open("../data/TinyStoriesV2-GPT4-valid.txt", "r") as f:
+        file_start = time.time()
+        with open("../data/TinyStoriesV2-GPT4-train.txt", "r") as f:
             lines = f.readlines()
+        print(f"4. File read took {time.time() - file_start:.2f}s")
 
-        sample_text = "".join(lines[:10])
-        sample_ids = tokenizer.encode(sample_text)
-        print(f"Sample processed: {len(sample_ids)} tokens")
-
-        # For large files, use chunked processing
+        join_start = time.time()
         full_text = "".join(lines)
-        if len(full_text) > 1000000:  # 1MB threshold
+        print(f"5. Text joining took {time.time() - join_start:.2f}s")
+        print(f"6. Text length: {len(full_text):,} characters")
+
+        encoding_start = time.time()
+        if len(full_text) > 1000000:
+            print("7. Using chunked encoding...")
             all_ids = tokenizer.encode_large_text(full_text)
-            token_array = np.array(token_ids, dtype=np.uint16)
-            np.save(output_path, token_array)
         else:
+            print("7. Using regular encoding...")
             all_ids = tokenizer.encode(full_text)
-            token_array = np.array(token_ids, dtype=np.uint16)
-            np.save(output_path, token_array)
 
-        print(f"Total tokens: {len(all_ids)}")
+        print(f"8. Encoding took {time.time() - encoding_start:.2f}s")
+        print(f"9. Generated {len(all_ids):,} tokens")
 
-        original_bytes = len(full_text.encode('utf-8'))
-        token_count = len(all_ids)
+        save_start = time.time()
+        token_array = np.array(all_ids, dtype=np.uint16)
+        print(f"10. Array conversion took {time.time() - save_start:.2f}s")
 
-        bytes_per_token = original_bytes / token_count
-        compression_ratio = original_bytes / token_count
+        np.save(output_path, token_array)
+        print(f"11. File save took {time.time() - save_start:.2f}s")
 
-        print(f"Original size: {original_bytes:,} bytes")
-        print(f"Token count: {token_count:,} tokens")
-        print(f"Bytes per token: {bytes_per_token:.2f}")
-        print(f"Compression: {compression_ratio:.2f}x")
+        print(f"12. Total time: {time.time() - start_total:.2f}s")
 
     except FileNotFoundError:
-        print("Test file not found, skipping file processing test")
+        print("File not found")
