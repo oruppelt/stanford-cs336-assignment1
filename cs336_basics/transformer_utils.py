@@ -7,7 +7,7 @@ import math
 
 import einx
 from einops import rearrange, einsum, reduce
-from .transformer_blocks import softmax
+from transformer_blocks import softmax
 
 def cross_entropy(oi, xi):
 

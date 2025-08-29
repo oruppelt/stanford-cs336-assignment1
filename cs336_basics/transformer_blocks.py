@@ -80,16 +80,16 @@ class SwiGLU(nn.Module):
         self.device = device
         self.dtype = dtype
 #
-        # if d_ff is None:
-        d_ff = int(8 / 3 * d_model)
-        # Round to nearest multiple of 64 for hardware efficiency
-        d_ff = ((d_ff + 63) // 64) * 64
+        if d_ff is None:
+            d_ff = int(8 / 3 * d_model)
+            # Round to nearest multiple of 64 for hardware efficiency
+            d_ff = ((d_ff + 63) // 64) * 64
 
         self.d_ff = d_ff
 
-        self.W1 = nn.Linear(d_ff, d_model, bias=False, device=device, dtype=dtype)
-        self.W2 = nn.Linear(d_model, d_ff, bias=False, device=device, dtype=dtype)
-        self.W3 = nn.Linear(d_ff, d_model, bias=False, device=device, dtype=dtype)
+        self.W1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.W2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.W3 = Linear(d_model, d_ff, device=device, dtype=dtype)
 
         # SiLU activation
         self.silu = SiLU()
@@ -236,8 +236,8 @@ class MultiHeadSelfAttention(nn.Module):
             Q_reshaped = rearrange(Q, "batch seq h d -> (batch h) seq d")
             K_reshaped = rearrange(K, "batch seq h d -> (batch h) seq d")
 
-            print(f"Debug: Q reshaped for RoPE: {Q_reshaped.shape}")
-            print(f"Debug: K reshaped for RoPE: {K_reshaped.shape}")
+            # print(f"Debug: Q reshaped for RoPE: {Q_reshaped.shape}")
+            # print(f"Debug: K reshaped for RoPE: {K_reshaped.shape}")
 
             # Apply RoPE
             Q_rope = self.rope(Q_reshaped, positions)

@@ -14,8 +14,8 @@ import math
 import json
 import sys
 
-from .transformer_blocks import TransformerLM
-from .transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
+from transformer_blocks import TransformerLM
+from transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
 
 
 def load_tokenized_data(file_path: str, dtype: np.dtype = np.uint16) -> np.memmap:

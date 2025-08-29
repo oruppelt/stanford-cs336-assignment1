@@ -165,3 +165,4 @@ cython_debug/
 # Data
 artifacts
 data
+cs336_basics/checkpoints
