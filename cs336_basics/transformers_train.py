@@ -16,6 +16,7 @@ import sys
 
 from transformer_blocks import TransformerLM
 from transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
+from experiment_logger import ExperimentLogger
 
 
 def load_tokenized_data(file_path: str, dtype: np.dtype = np.uint16) -> np.memmap:
@@ -231,6 +232,10 @@ def parse_arguments():
                         help="Evaluate every N steps")
     parser.add_argument("--log_every", type=int, default=100,
                         help="Log every N steps")
+    parser.add_argument("--experiment_name", type=str, default=None,
+                        help="Name for this experiment (for logging)")
+    parser.add_argument("--log_dir", type=str, default="./logs",
+                        help="Directory for experiment logs")
 
     # System arguments
     parser.add_argument("--device", type=str, default="auto",
@@ -283,6 +288,14 @@ def main():
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
     print(f"Configuration saved to {config_path}")
+
+    experiment_name = args.experiment_name or f"exp_{int(time.time())}"
+
+    logger = ExperimentLogger(
+        experiment_name=experiment_name,
+        log_dir=args.log_dir,
+        config=config
+    )
 
     # Load data
     print("Loading training and validation data...")
@@ -364,6 +377,13 @@ def main():
         # Gradient clipping
         gradient_clipping(model.parameters(), args.grad_clip)
 
+        total_norm = 0.0
+        for p in model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        grad_norm = total_norm ** 0.5
+
         # Optimizer step
         optimizer.step()
 
@@ -384,8 +404,20 @@ def main():
                 val_loss = evaluate_model(model, val_data, args.batch_size,
                                           args.context_length, device)
 
+            logger.log_step(
+                iteration=iteration,
+                train_loss=avg_loss,
+                val_loss=val_loss,
+                learning_rate=lr,
+                grad_norm=grad_norm,
+                tokens_per_sec=tokens_per_sec
+            )
+
             log_metrics(iteration, avg_loss, val_loss, lr, elapsed_time, tokens_per_sec)
             log_losses = []
+
+            if iteration % (args.save_every // 2) == 0:
+                logger.save()
 
         # Save checkpoint
         if iteration % args.save_every == 0 and iteration > 0:
@@ -405,6 +437,13 @@ def main():
     final_val_loss = evaluate_model(model, val_data, args.batch_size,
                                     args.context_length, device, num_eval_batches=50)
     print(f"Final validation loss: {final_val_loss:.4f}")
+
+    logger.log_step(
+        iteration=args.max_steps,
+        val_loss=final_val_loss
+    )
+    logger.save(force=True)
+    logger.print_summary()
 
     total_time = time.time() - start_time
     total_tokens = args.max_steps * args.batch_size * args.context_length
