@@ -24,9 +24,9 @@ from cs336_basics.transformer_blocks import Linear, Embedding, RMSNorm, SwiGLU, 
 from cs336_basics.transformer_blocks import softmax, scaled_dot_product_attention, TransformerBlock, TransformerLM
 # from cs336_basics.debug_mhsa import MultiHeadSelfAttention
 
-from cs336_basics.transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
+# from cs336_basics.transformer_utils import cross_entropy, AdamW, cos_annealing, gradient_clipping
 
-from cs336_basics.transformers_train import load_batch, save_checkpoint, load_checkpoint
+# from cs336_basics.transformers_train import load_batch, save_checkpoint, load_checkpoint
 
 def run_linear(
     d_in: int,

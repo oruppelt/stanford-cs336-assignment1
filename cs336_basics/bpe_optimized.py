@@ -50,6 +50,8 @@ class OptimizedBPETrainer:
         self.pair_locations: Dict[Tuple[bytes, bytes], Set[bytes]] = defaultdict(set)  # pair -> words containing it
         self._pairs_dirty = True  # flag to track if we need to recompute from scratch
 
+        self._single_bytes = [bytes([i]) for i in range(256)]
+
     # -------- Pretokenization --------
 
     def pretokenize_from_string(self, text: str) -> "OptimizedBPETrainer":
@@ -82,7 +84,7 @@ class OptimizedBPETrainer:
     def _init_state_from_counts(self, wc: Counter[bytes]) -> None:
         self.word_counts = wc
         # Each pretoken becomes a sequence of *single bytes* symbols.
-        self.segmented_words = {w: [bytes([b]) for b in w] for w in wc}
+        self.segmented_words = {w: [self._single_bytes[b] for b in w] for w in wc}
         # Base 256-byte alphabet, ids 0..255 by byte value.
         self.vocab_index = {bytes([b]): b for b in range(256)}
         self._pairs_dirty = True
@@ -125,7 +127,9 @@ class OptimizedBPETrainer:
             freq = self.word_counts[word]
 
             # Get pairs before merge
-            old_pairs = self._get_pairs_in_word(seq)
+            # old_pairs = self._get_pairs_in_word(seq)
+            old_pairs = [(seq[i], seq[i+1]) for i in range(len(seq)-1)]
+            old_mult = Counter(old_pairs)
 
             # Apply merge to sequence
             new_seq = []
@@ -140,24 +144,50 @@ class OptimizedBPETrainer:
 
             # Get pairs after merge
             new_pairs = self._get_pairs_in_word(new_seq)
+            new_mult = Counter(new_pairs)
 
-            # Update pair counts and locations
-            # Remove old pairs
-            for old_pair in old_pairs:
-                self.pair_counts[old_pair] -= freq
-                if self.pair_counts[old_pair] <= 0:
-                    del self.pair_counts[old_pair]
-                self.pair_locations[old_pair].discard(word)
-                if not self.pair_locations[old_pair]:
-                    del self.pair_locations[old_pair]
+            # # Update pair counts and locations
+            # # Remove old pairs
+            # for old_pair in old_pairs:
+            #     self.pair_counts[old_pair] -= freq
+            #     if self.pair_counts[old_pair] <= 0:
+            #         del self.pair_counts[old_pair]
+            #     self.pair_locations[old_pair].discard(word)
+            #     if not self.pair_locations[old_pair]:
+            #         del self.pair_locations[old_pair]
 
-            # Add new pairs
-            for new_pair in new_pairs:
-                self.pair_counts[new_pair] += freq
-                self.pair_locations[new_pair].add(word)
+            # # Add new pairs
+            # for new_pair in new_pairs:
+            #     self.pair_counts[new_pair] += freq
+            #     self.pair_locations[new_pair].add(word)
+
+            # Update counts by multiplicity * word frequency
+            for p, m in old_mult.items():
+                self.pair_counts[p] -= freq * m
+                if self.pair_counts[p] <= 0:
+                    self.pair_counts.pop(p, None)
+
+            for p, m in new_mult.items():
+                self.pair_counts[p] += freq * m
+
+            # Update locations by presence/absence (not multiplicity)
+            old_set = set(old_mult.keys())
+            new_set = set(new_mult.keys())
+
+            for p in old_set - new_set:
+                locs = self.pair_locations.get(p)
+                if locs is not None:
+                    locs.discard(word)
+                    if not locs:
+                        self.pair_locations.pop(p, None)
+
+            for p in new_set:
+                self.pair_locations[p].add(word)
 
             # Update word segmentation
             self.segmented_words[word] = new_seq
+
+        # del self.pair_locations[pair]
 
     def fit_to_vocab_size(self, vocab_size: int, progress: bool = False) -> "OptimizedBPETrainer":
         """Greedy BPE with incremental pair counting; tie-break by lexicographically GREATER pair."""
@@ -183,6 +213,8 @@ class OptimizedBPETrainer:
             check_memory()
             if progress and merge_count % 1000 == 0:
                 print(f"Completed {merge_count} merges, vocab size: {len(self.vocab_index)}")
+            if (merge_count & 0x1FFF) == 0:   # every ~8192 merges
+                check_memory()
 
         return self
 
