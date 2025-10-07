@@ -1,3 +1,5 @@
 python transformers_train.py --train_data ../artifacts/ts_train/train_tokens.npy --val_data ../artifacts/ts_train/val_tokens.npy --vocab_size 10000 --batch_size 16 --context_length 512 --max_steps 100 --device auto
 
-python transformers_train.py --train_data ../artifacts/ts_train/train_tokens.npy --val_data ../artifacts/ts_train/val_tokens.npy --vocab_size 10000 --batch_size 16 --context_length 512 --max_steps 1000 --device auto --experiment_name baseline --log_every 50 --eval_every 500
+python transformers_train.py --train_data ../artifacts/ts_train/train_tokens.npy --val_data ../artifacts/ts_train/val_tokens.npy --vocab_size 10000 --batch_size 16 --context_length 256 --max_steps 1000 --device auto --experiment_name baseline --log_every 50 --eval_every 500
+
+python transformers_train.py --train_data ../artifacts/ts_train/train_tokens.npy --val_data ../artifacts/ts_train/val_tokens.npy --vocab_size 10000 --batch_size 64 --d_model 512 --num_layers 4 --num_heads 16 --context_length 256 --max_steps 20000 --device auto --experiment_name baseline --log_every 50 --eval_every 200

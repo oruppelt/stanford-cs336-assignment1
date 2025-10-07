@@ -88,7 +88,7 @@ if __name__ == "__main__":
         input_path=input_path,
         vocab_size=vocab_size,
         special_tokens=special_tokens,
-        num_processes=4,
+        num_processes=None,
     )
 
     # Serialize (bytes-safe via latin1 round-trip)

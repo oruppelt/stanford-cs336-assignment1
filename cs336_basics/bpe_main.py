@@ -360,7 +360,7 @@ if __name__ == "__main__":
         special_tokens=["<|endoftext|>"]
     )
 
-    output_path = "../artifacts/ts_train/train_tokens.npy"
+    output_path = "../artifacts/ts_train/val_tokens.npy"
 
     # Test with small text
     test_start = time.time()
@@ -376,7 +376,7 @@ if __name__ == "__main__":
     try:
         # NEW: More efficient file reading
         file_start = time.time()
-        with open("../data/TinyStoriesV2-GPT4-train.txt", "rb") as f:  # Read as binary first
+        with open("../data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:  # Read as binary first
             raw_data = f.read()
         full_text = raw_data.decode('utf-8', errors='replace')  # Decode with error handling
         print(f"File read took {time.time() - file_start:.2f}s - {len(full_text):,} chars")

@@ -304,7 +304,7 @@ class TransformerLM(nn.Module):
         d_model: int,
         num_heads: int,
         num_layers: int,
-        d_ff: int = None,
+        d_ff: int = 1344,
         rope_theta: float = 10000.0,
         eps: float = 1e-5
     ):
